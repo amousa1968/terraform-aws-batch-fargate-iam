@@ -1,3 +1,12 @@
+/*
+data "aws_region" "current" {}
+
+locals {
+  region = data.aws_region.current.name  # This is correct
+}
+*/
+
+
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
