@@ -134,9 +134,33 @@ resource "aws_iam_role_policy_attachment" "batch_fargate_attach" {
   policy_arn = aws_iam_policy.batch_fargate_policy.arn
 }
 
+resource "aws_iam_role" "lambda_exec" {
+  name = "lambda-exec-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Effect = "Allow",
+      Principal = {
+        Service = "lambda.amazonaws.com"
+      },
+      Action = "sts:AssumeRole"
+    }]
+  })
+
+  tags = {
+    Name = "LambdaExecutionRole"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_exec_policy" {
+  role       = aws_iam_role.lambda_exec.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
 
 #------------------------------------------------
-# Batch Compute Environment (Fargate)
+# Batch Compute Environment (Fargate/ECS)
 #------------------------------------------------
 # --------------------------
 # VPC for Batch Environment
@@ -253,75 +277,83 @@ resource "aws_cloudtrail" "batch_trail" {
   include_global_service_events = true
   is_multi_region_trail         = true
   enable_log_file_validation    = true
-
   event_selector {
     read_write_type           = "All"
     include_management_events = true
+    # Resource type not required for full API-level logging
   }
 
   tags = {
-    Name = "batch-trail"
+    Name = "BatchCloudTrail"
   }
 }
 
-##################
 resource "aws_s3_bucket" "cloudtrail_logs" {
-  bucket        = "my-batch-cloudtrail-logs-secure"
-  force_destroy = true
+  bucket = "${var.namespace}-cloudtrail-logs"
 
   tags = {
-    Name = "cloudtrail-logs"
+    Name = "CloudTrailLogs"
   }
 }
 
-resource "aws_s3_bucket_server_side_encryption_configuration" "cloudtrail_encryption" {
+resource "aws_s3_bucket_policy" "cloudtrail_policy" {
   bucket = aws_s3_bucket.cloudtrail_logs.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
-resource "aws_s3_bucket_lifecycle_configuration" "cloudtrail_lifecycle" {
-  bucket = aws_s3_bucket.cloudtrail_logs.id
-
-  rule {
-    id     = "expire-old-versions"
-    status = "Enabled"
-
-    filter {} # REQUIRED: Even an empty filter is valid
-
-    noncurrent_version_expiration {
-      noncurrent_days = 30
-    }
-  }
-}
-
-resource "aws_s3_bucket_policy" "restrict_access_by_tag" {
-  bucket = aws_s3_bucket.batch_data.bucket
 
   policy = jsonencode({
     Version = "2012-10-17",
-    Statement = [
-      {
-        Sid       = "AllowS3AccessByTag",
-        Effect    = "Allow",
-        Principal = "*",
-        Action    = ["s3:GetObject", "s3:PutObject"],
-        Resource  = "arn:aws:s3:::${aws_s3_bucket.batch_data.bucket}/*",
-        Condition = {
-          StringEquals = {
-            "aws:PrincipalTag/Department" = var.allowed_department
-          }
+    Statement = [{
+      Effect    = "Allow",
+      Principal = {
+        Service = "cloudtrail.amazonaws.com"
+      },
+      Action    = "s3:GetBucketAcl",
+      Resource  = "arn:aws:s3:::${aws_s3_bucket.cloudtrail_logs.bucket}"
+    }, {
+      Effect    = "Allow",
+      Principal = {
+        Service = "cloudtrail.amazonaws.com"
+      },
+      Action    = "s3:PutObject",
+      Resource  = "arn:aws:s3:::${aws_s3_bucket.cloudtrail_logs.bucket}/AWSLogs/${local.account_id}/*",
+      Condition = {
+        StringEquals = {
+          "s3:x-amz-acl" = "bucket-owner-full-control"
         }
       }
-    ]
+    }]
   })
 }
 
-#### new
+#---------------------------------------------------
+### Enable EventBridge Rule for Batch Events ####
+#---------------------------------------------------
+
+resource "aws_cloudwatch_event_rule" "batch_event_rule" {
+  name        = "batch-job-monitor"
+  description = "Monitor AWS Batch job state changes"
+  event_pattern = jsonencode({
+    "source": ["aws.batch"],
+    "detail-type": ["Batch Job State Change"]
+  })
+}
+
+
+resource "aws_cloudwatch_event_target" "batch_event_target" {
+  rule      = aws_cloudwatch_event_rule.batch_event_rule.name
+  target_id = "BatchEventLogger"
+  arn       = aws_lambda_function.batch_event_logger.arn
+}
+
+resource "aws_lambda_function" "batch_event_logger" {
+  function_name = "batch-event-logger"
+  filename      = "lambda.zip"                       # Ensure this zip file exists in the same directory
+#  source_code_hash = filebase64sha256("lambda.zip")  # Ensures deployment triggers on zip changes
+  handler       = "index.handler"                    # Adjust based on your zip file content
+  runtime       = "python3.11"
+
+  role = aws_iam_role.lambda_exec.arn                # IAM role allowing Lambda execution
+}
+
 resource "aws_s3_bucket" "batch_data" {
   bucket = "my-batch-data-bucket-123456" # Change to a unique name
 
@@ -332,7 +364,6 @@ resource "aws_s3_bucket" "batch_data" {
 }
 
 
-#########################
 # --------------------------------------------------
 # Enable Amazon Inspector for container image scanning
 # --------------------------------------------------
@@ -350,13 +381,6 @@ resource "aws_inspector2_delegated_admin_account" "inspector_admin" {
 resource "aws_guardduty_detector" "main" {
   enable = true
 }
-
-/*
-resource "aws_inspector2_enabler" "ecs_runtime_monitoring" {
-  account_ids    = [data.aws_caller_identity.current.account_id]
-  resource_types = ["ECS"]
-}
-*/
 
 
 # --------------------------------------------------
@@ -538,8 +562,6 @@ resource "aws_iam_policy" "batch_access_control_policy" {
 }
 
 
-#
-
 # -------------------------------------------------------------------
 # Restrict access to AWS Batch resources on Fargate ECS
 # based on user tags and context
@@ -585,7 +607,10 @@ resource "aws_iam_policy" "batch_restricted_access" {
   })
 }
 
+
+#------------------------------------------------------------
 # Attach policy to a role used by developers or CI/CD system
+#------------------------------------------------------------
 resource "aws_iam_role_policy_attachment" "batch_access_attachment" {
   role       = aws_iam_role.batch_job_role.name
   policy_arn = aws_iam_policy.batch_restricted_access.arn
