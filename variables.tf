@@ -84,3 +84,10 @@ variable "batch_resources_arn_prefix" {
   type        = string
   default     = "arn:aws:batch:*:*:job-definition/"
 }
+
+variable "container_image" {
+  description = "The URI of the container image to use for the Batch job"
+  type        = string
+  default     = "public.ecr.aws/amazonlinux/amazonlinux:latest" # or your image
+}
+
