@@ -1,3 +1,34 @@
+variable "namespace" {
+  type 		= string
+description = "A simple namespace value for this resource."
+}
+
+variable "name" {
+  type		= string
+description = "A simple name value for this resource."
+}
+
+variable "tags" {
+  type		= map (any)
+description = "A mapping of tags for this resource."
+}
+
+/*
+variable "namespace" {
+  description = "Project or environment prefix used for naming resources"
+  type        = string
+  default     = "myproject"  # Change this to suit your use case
+}
+*/
+
+/*
+variable "name" {
+  description = "Name suffix for uniquely identifying resources"
+  type        = string
+  default     = "batch"  # Change this to something meaningful like 'job' or 'pipeline'
+}
+*/
+
 variable "role_name" {
   type        = string
   description = "IAM role name for Fargate Batch execution"
@@ -53,4 +84,3 @@ variable "batch_resources_arn_prefix" {
   type        = string
   default     = "arn:aws:batch:*:*:job-definition/"
 }
-
