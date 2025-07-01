@@ -4,7 +4,8 @@ data "aws_region" "current" {}
 locals {
   name       = "${var.namespace}-${var.name}"
   account_id = data.aws_caller_identity.current.account_id
-  region     = data.aws_region.current.region
+#  region     = data.aws_region.current.region
+  region = data.aws_region.current.name  # Use 'name' instead of 'region'
 }
 
 
@@ -165,11 +166,12 @@ resource "aws_iam_role_policy_attachment" "lambda_exec_policy" {
 # --------------------------
 # VPC for Batch Environment
 # --------------------------
+
 resource "aws_vpc" "batch_vpc" {
-  cidr_block           = var.vpc_cidr
+  cidr_block           = "10.0.0.0/16"
   enable_dns_support   = true
   enable_dns_hostnames = true
-
+  
   tags = {
     Name = "batch-vpc"
   }
@@ -178,15 +180,15 @@ resource "aws_vpc" "batch_vpc" {
 # --------------------------
 # Private Subnets
 # --------------------------
-resource "aws_subnet" "private_subnets" {
-  count                   = length(var.private_subnet_cidrs)
-  vpc_id                  = aws_vpc.batch_vpc.id
-  cidr_block              = var.private_subnet_cidrs[count.index]
-  availability_zone       = var.availability_zones[count.index]
-  map_public_ip_on_launch = false
 
+resource "aws_subnet" "batch_subnets" {
+  count             = length(var.availability_zones)
+  vpc_id            = aws_vpc.batch_vpc.id
+  cidr_block        = cidrsubnet(aws_vpc.batch_vpc.cidr_block, 8, count.index)
+  availability_zone = var.availability_zones[count.index]
+  
   tags = {
-    Name = "batch-private-subnet-${count.index}"
+    Name = "batch-subnet-${count.index}"
   }
 }
 
@@ -195,46 +197,39 @@ resource "aws_subnet" "private_subnets" {
 # --------------------------
 resource "aws_network_acl" "batch_nacl" {
   vpc_id = aws_vpc.batch_vpc.id
+  
+  # Add your NACL rules here
+  egress {
+    protocol   = "-1"
+    rule_no    = 100
+    action     = "allow"
+    cidr_block = "0.0.0.0/0"
+    from_port  = 0
+    to_port    = 0
+  }
+
+  ingress {
+    protocol   = "-1"
+    rule_no    = 100
+    action     = "allow"
+    cidr_block = "0.0.0.0/0"
+    from_port  = 0
+    to_port    = 0
+  }
 
   tags = {
-    Name = "batch-private-nacl"
+    Name = "batch-nacl"
   }
-}
-
-# Allow all egress
-resource "aws_network_acl_rule" "egress_all" {
-  network_acl_id = aws_network_acl.batch_nacl.id
-  rule_number    = 100
-  egress         = true
-  protocol       = "-1"
-  rule_action    = "allow"
-  cidr_block     = "0.0.0.0/0"
-}
-
-# Allow internal ingress from within VPC CIDR
-resource "aws_network_acl_rule" "ingress_internal" {
-  network_acl_id = aws_network_acl.batch_nacl.id
-  rule_number    = 100
-  egress         = false
-  protocol       = "-1"
-  rule_action    = "allow"
-  cidr_block     = var.vpc_cidr
 }
 
 # --------------------------
 # Security Group
 # --------------------------
-resource "aws_security_group" "batch_sg" {
-  name        = "batch-fargate-sg"
-  description = "Restrictive SG for Batch Fargate jobs"
-  vpc_id      = aws_vpc.batch_vpc.id
 
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
-  }
+resource "aws_security_group" "batch_sg" {
+  name        = "batch-security-group"
+  description = "Security group for AWS Batch"
+  vpc_id      = aws_vpc.batch_vpc.id  # Consistent VPC reference
 
   egress {
     from_port   = 0
@@ -244,7 +239,7 @@ resource "aws_security_group" "batch_sg" {
   }
 
   tags = {
-    Name = "batch-fargate-sg"
+    Name = "batch-sg"
   }
 }
 
@@ -253,17 +248,16 @@ resource "aws_security_group" "batch_sg" {
 # ----------------------------------------
 
 resource "aws_batch_compute_environment" "batch_fargate_ce" {
-  name = "fargate-ce"
+  name         = "fargate-batch-env"
+  type         = "MANAGED"
+  service_role = aws_iam_role.batch_service.arn
 
   compute_resources {
     type               = "FARGATE"
     max_vcpus          = 16
-    subnets            = aws_subnet.private_subnets[*].id
     security_group_ids = [aws_security_group.batch_sg.id]
+    subnets            = aws_subnet.batch_subnets[*].id
   }
-
-  service_role = aws_iam_role.batch_service_role.arn
-  type         = "MANAGED"
 }
 
 
@@ -615,3 +609,4 @@ resource "aws_iam_role_policy_attachment" "batch_access_attachment" {
   role       = aws_iam_role.batch_job_role.name
   policy_arn = aws_iam_policy.batch_restricted_access.arn
 }
+
