@@ -1,20 +1,10 @@
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
-/*
-locals {
-#  account id = data.aws_caller_identity.current.account_id
-  region     = data.aws_region.current.region
-  name       = "${var.namespace}-${var.name}"
-
-}
-*/
-
-# data "aws_caller_identity" "current" {}
-
 locals {
   name       = "${var.namespace}-${var.name}"
   account_id = data.aws_caller_identity.current.account_id
+  region     = data.aws_region.current.region
 }
 
 
@@ -429,29 +419,81 @@ resource "aws_iam_role_policy_attachment" "batch_attach_policy" {
 }
 
 
+# --------------------------------------------------
+# TLS Compliance Fargate Batch Job
+# --------------------------------------------------
+
 resource "aws_batch_job_definition" "fargate_job" {
-  name = "fargate-batch-job"
+  name = "${var.namespace}-${var.name}-job"
   type = "container"
 
   platform_capabilities = ["FARGATE"]
 
   container_properties = jsonencode({
-    image      = "123456789012.dkr.ecr.us-west-2.amazonaws.com/my-job-image:latest",
-    executionRoleArn = aws_iam_role.batch_job_role.arn,
-    jobRoleArn       = aws_iam_role.batch_job_role.arn,
+    image      = var.container_image
+    jobRoleArn = aws_iam_role.batch_job_role.arn
+    executionRoleArn = aws_iam_role.batch_execution_role.arn
     resourceRequirements = [
-      { type = "VCPU", value = "1" },
-      { type = "MEMORY", value = "2048" }
-    ],
+      {
+        type  = "VCPU"
+        value = "1"
+      },
+      {
+        type  = "MEMORY"
+        value = "2048"
+      }
+    ]
+    environment = [
+      {
+        name  = "API_ENDPOINT"
+        value = "https://api.mysecureapp.com" # Enforcing TLS endpoint
+      },
+      {
+        name  = "S3_BUCKET_URL"
+        value = "https://mybucket.s3.amazonaws.com" # TLS
+      },
+      {
+        name  = "ENFORCE_TLS"
+        value = "true"
+      }
+    ]
     logConfiguration = {
-      logDriver = "awslogs",
+      logDriver = "awslogs"
       options = {
-        "awslogs-group"         = "/aws/batch/job",
-        "awslogs-region"        = var.region,
-        "awslogs-stream-prefix" = "batch"
+        "awslogs-group"         = "/aws/batch/job/${var.namespace}-${var.name}"
+        "awslogs-region"        = var.region
+        "awslogs-stream-prefix" = "fargate"
       }
     }
+    networkConfiguration = {
+      assignPublicIp = "DISABLED"
+    }
   })
+}
+
+
+resource "aws_iam_role" "batch_execution_role" {
+  name = "${var.namespace}-${var.name}-execution-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [{
+      Effect = "Allow",
+      Principal = {
+        Service = "ecs-tasks.amazonaws.com"
+      },
+      Action = "sts:AssumeRole"
+    }]
+  })
+
+  tags = {
+    Name = "${var.namespace}-${var.name}-execution-role"
+  }
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_execution_policy" {
+  role       = aws_iam_role.batch_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
 
@@ -548,4 +590,3 @@ resource "aws_iam_role_policy_attachment" "batch_access_attachment" {
   role       = aws_iam_role.batch_job_role.name
   policy_arn = aws_iam_policy.batch_restricted_access.arn
 }
-
