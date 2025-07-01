@@ -60,10 +60,19 @@ variable "private_subnet_cidrs" {
   default     = ["10.0.1.0/24", "10.0.2.0/24"]
 }
 
+
 variable "availability_zones" {
   type        = list(string)
   description = "Availability zones for each subnet"
 }
+
+/*
+variable "availability_zones" {
+  description = "List of availability zones for subnets"
+  type        = list(string)
+  default     = ["us-east-1a", "us-east-1b"]  # Adjust for your region
+}
+*/
 
 variable "region" {
   description = "The AWS region to deploy resources into."
