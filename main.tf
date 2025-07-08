@@ -1,20 +1,10 @@
-/*
-data "aws_region" "current" {}
-
-locals {
-  region = data.aws_region.current.name  # This is correct
-}
-*/
-
-
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 locals {
   name       = "${var.namespace}-${var.name}"
   account_id = data.aws_caller_identity.current.account_id
-#  region     = data.aws_region.current.region
-  region = data.aws_region.current.name  # Use 'name' instead of 'region'
+  region     = data.aws_region.current.region  # Fixed deprecated attribute usage
 }
 
 
@@ -449,6 +439,7 @@ resource "aws_iam_role_policy_attachment" "batch_attach_policy" {
 # --------------------------------------------------
 # TLS Compliance Fargate Batch Job
 # --------------------------------------------------
+
 resource "aws_batch_job_definition" "tls_job" {
   name                  = var.job_definition_name
   type                  = "container"
