@@ -449,80 +449,19 @@ resource "aws_iam_role_policy_attachment" "batch_attach_policy" {
 # --------------------------------------------------
 # TLS Compliance Fargate Batch Job
 # --------------------------------------------------
-
-resource "aws_batch_job_definition" "fargate_job" {
-  name = "${var.namespace}-${var.name}-job"
-  type = "container"
-
+resource "aws_batch_job_definition" "tls_job" {
+  name                  = var.job_definition_name
+  type                  = "container"
   platform_capabilities = ["FARGATE"]
 
-  container_properties = jsonencode({
-    image      = var.container_image
-    jobRoleArn = aws_iam_role.batch_job_role.arn
-    executionRoleArn = aws_iam_role.batch_execution_role.arn
-    resourceRequirements = [
-      {
-        type  = "VCPU"
-        value = "1"
-      },
-      {
-        type  = "MEMORY"
-        value = "2048"
-      }
-    ]
-    environment = [
-      {
-        name  = "API_ENDPOINT"
-        value = "https://api.mysecureapp.com" # Enforcing TLS endpoint
-      },
-      {
-        name  = "S3_BUCKET_URL"
-        value = "https://mybucket.s3.amazonaws.com" # TLS
-      },
-      {
-        name  = "ENFORCE_TLS"
-        value = "true"
-      }
-    ]
-    logConfiguration = {
-      logDriver = "awslogs"
-      options = {
-        "awslogs-group"         = "/aws/batch/job/${var.namespace}-${var.name}"
-        "awslogs-region"        = var.region
-        "awslogs-stream-prefix" = "fargate"
-      }
-    }
-    networkConfiguration = {
-      assignPublicIp = "DISABLED"
-    }
-  })
+  container_properties = <<CONTAINER_PROPERTIES
+{
+  "image": "${var.container_image}",
+  "executionRoleArn": "${var.execution_role_arn}",
+  "jobRoleArn": "${var.job_role_arn}"
 }
-
-
-resource "aws_iam_role" "batch_execution_role" {
-  name = "${var.namespace}-${var.name}-execution-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17",
-    Statement = [{
-      Effect = "Allow",
-      Principal = {
-        Service = "ecs-tasks.amazonaws.com"
-      },
-      Action = "sts:AssumeRole"
-    }]
-  })
-
-  tags = {
-    Name = "${var.namespace}-${var.name}-execution-role"
-  }
+CONTAINER_PROPERTIES
 }
-
-resource "aws_iam_role_policy_attachment" "ecs_execution_policy" {
-  role       = aws_iam_role.batch_execution_role.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-}
-
 
 # -------------------------------------------------------------------
 # Restrict Batch resource access based on user attributes and context
