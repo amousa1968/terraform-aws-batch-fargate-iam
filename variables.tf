@@ -100,3 +100,24 @@ variable "container_image" {
   default     = "public.ecr.aws/amazonlinux/amazonlinux:latest" # or your image
 }
 
+########################### TLC #
+variable "job_definition_name" {
+  description = "Name of the Batch job definition"
+  type        = string
+  default     = "tls-batch-job"
+}
+
+variable "container_image" {
+  description = "Container image URI with TLS support"
+  type        = string
+}
+
+variable "execution_role_arn" {
+  description = "ARN of the execution role"
+  type        = string
+}
+
+variable "job_role_arn" {
+  description = "ARN of the job role"
+  type        = string
+}
