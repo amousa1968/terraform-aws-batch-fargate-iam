@@ -30,4 +30,5 @@ Success! The configuration is valid.
 ```
 <img width="524" alt="image" src="https://github.com/user-attachments/assets/248e0b0a-c8e9-451c-91fe-580c713a364b" />
 
-
+## Images
+![AWS Lading Zone](aws_endpoint.jpeg)
